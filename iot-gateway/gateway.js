@@ -3,7 +3,16 @@ import { ethers } from 'ethers';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import http from 'http';
+import { Server } from 'socket.io';
+
 dotenv.config();
+
+// Socket.io Initialization
+const server = http.createServer();
+const io = new Server(server, {
+  cors: { origin: "*" }
+});
 
 // MongoDB Setup (Off-Chain Storage on the Pi)
 mongoose.connect(process.env.mongodb_url);
@@ -11,9 +20,33 @@ const LogSchema = new mongoose.Schema({
   deviceId: String,
   temperature: Number,
   hash: { type: String, unique: true },
+  status: { type: String, default: 'Pending' },
   timestamp: { type: Date, default: Date.now }
 });
 const DataLog = mongoose.model('DataLog', LogSchema);
+
+// Handle new frontend connections and send historical data
+io.on('connection', async (socket) => {
+  console.log("🟢 Frontend connected to Socket.io");
+  try {
+    const logs = await DataLog.find().sort({ timestamp: -1 }).limit(50);
+    // Map them to include their saved status
+    const formattedLogs = logs.map(log => {
+      return {
+        ...log.toObject(),
+        status: log.status, // Rely completely on actual DB status
+        temp: log.temperature
+      };
+    });
+    socket.emit('initialLogs', formattedLogs);
+  } catch (err) {
+    console.error("❌ Error fetching initial logs:", err);
+  }
+});
+
+server.listen(3001, () => {
+  console.log("🔌 Socket.io server running on port 3001");
+});
 
 // Blockchain Setup (Connecting to your PC)
 const PC_IP = "127.0.0.1";
@@ -48,8 +81,24 @@ client.on('message', async (topic, message) => {
       const tx = await contract.storeHash(data.deviceId, data.hash);
       await tx.wait();
       console.log(`✔️ Verified on Blockchain. Tx: ${tx.hash}`);
+      newLog.status = 'Verified';
+      await newLog.save();
+      io.emit('newLog', {
+        ...data,
+        temp: data.temperature,
+        timestamp: newLog.timestamp,
+        status: 'Verified'
+      });
     } catch (blockError) {
       console.error("❌ Blockchain Error:", blockError.reason || blockError.message);
+      newLog.status = 'Rejected/Unauthorized';
+      await newLog.save();
+      io.emit('newLog', {
+        ...data,
+        temp: data.temperature,
+        timestamp: newLog.timestamp,
+        status: 'Rejected/Unauthorized'
+      });
     }
 
   } catch (mongoError) {

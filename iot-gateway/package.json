@@ -1,8 +1,9 @@
 {
   "name": "iot-gateway",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "gateway.js",
   "scripts": {
+    "start": "nodemon gateway.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -10,10 +11,15 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "ethers": "^6.16.0",
     "mongoose": "^9.6.1",
     "mqtt": "^5.15.1",
+    "socket.io": "^4.8.3",
     "web3": "^4.16.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }
