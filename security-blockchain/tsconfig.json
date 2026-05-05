@@ -9,5 +9,11 @@
     "skipLibCheck": true,
     "moduleResolution": "node16",
     "outDir": "dist"
-  }
+  },
+  "include": [
+    "./scripts",
+    "./test",
+    "./typechain-types",
+    "./hardhat.config.ts"
+  ]
 }

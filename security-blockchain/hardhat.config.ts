@@ -1,14 +1,13 @@
-import hardhatToolboxMochaEthersPlugin from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
-import { configVariable, defineConfig } from "hardhat/config";
+import "@nomicfoundation/hardhat-toolbox";
+import { HardhatUserConfig, vars } from "hardhat/config";
 
-export default defineConfig({
-  plugins: [hardhatToolboxMochaEthersPlugin],
+const SEPOLIA_RPC_URL = vars.has("SEPOLIA_RPC_URL") ? vars.get("SEPOLIA_RPC_URL") : "";
+const SEPOLIA_PRIVATE_KEY = vars.has("SEPOLIA_PRIVATE_KEY") ? vars.get("SEPOLIA_PRIVATE_KEY") : "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+const config: HardhatUserConfig = {
   solidity: {
-    profiles: {
-      default: {
-        version: "0.8.28",
-      },
-      production: {
+    compilers: [
+      {
         version: "0.8.28",
         settings: {
           optimizer: {
@@ -17,22 +16,14 @@ export default defineConfig({
           },
         },
       },
-    },
+    ],
   },
   networks: {
-    hardhatMainnet: {
-      type: "edr-simulated",
-      chainType: "l1",
-    },
-    hardhatOp: {
-      type: "edr-simulated",
-      chainType: "op",
-    },
     sepolia: {
-      type: "http",
-      chainType: "l1",
-      url: configVariable("SEPOLIA_RPC_URL"),
-      accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
+      url: SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
+      accounts: [SEPOLIA_PRIVATE_KEY],
     },
   },
-});
+};
+
+export default config;
