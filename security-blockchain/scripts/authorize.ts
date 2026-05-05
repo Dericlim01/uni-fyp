@@ -3,8 +3,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 async function main() {
-  const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // replace the contract address
-  const deviceId = process.env.DEVICE_ID || "ESP32_01";
+  const contractAddress = ""; // replace the contract address
+  const deviceId = process.env.DEVICE_ID || ""; // replace the device id
 
   // Check if ethers is actually loaded
   if (!hre.ethers) {
