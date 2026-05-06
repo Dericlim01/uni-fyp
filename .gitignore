@@ -1,0 +1,19 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Compilation output
+/dist
+
+# production
+/build
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+backup
+
+esp32

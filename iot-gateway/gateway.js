@@ -15,7 +15,11 @@ const io = new Server(server, {
 });
 
 // MongoDB Setup (Off-Chain Storage on the Pi)
-mongoose.connect(process.env.mongodb_url);
+mongoose.connect(process.env.mongodb_url).catch(err => {
+  console.error("❌ MongoDB connection error:", err.message);
+  console.error("💡 Tip: Make sure your MongoDB service is running locally on port 27017.");
+});
+
 const LogSchema = new mongoose.Schema({
   deviceId: String,
   temperature: Number,
@@ -49,7 +53,7 @@ server.listen(3001, () => {
 });
 
 // Blockchain Setup (Connecting to your PC)
-const PC_IP = "127.0.0.1";
+const PC_IP = process.env.PC_IP || "127.0.0.1";
 const provider = new ethers.JsonRpcProvider(`http://${PC_IP}:8545`);
 
 // Use the Private Key from Account #0 in your Hardhat terminal
