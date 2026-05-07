@@ -1,86 +1,119 @@
-# 🛡️ Secure ESP32 Edge Node: Root of Trust Implementation
+# 🔌 ESP32 Secure IoT Node
 
-> **Overview**
-> This project implements a sophisticated **"Root of Trust"** architecture for ESP32. By moving the private key into **NVS (Non-Volatile Storage)**, the sensitive key is kept entirely separate from the hardcoded firmware source code. This provides an essential layer of protection against simple memory dumps and code leaks.
-
----
-
-## 🚀 The Three-Phase Architecture
-
-This guide details the complete setup for your Secure ESP32 Edge Node, broken down into three distinct phases:
-
-1. **Provisioning (Key Storage)**
-2. **Main Secure Firmware (Data & Signing)**
-3. **Gateway Verification (Blockchain Integration)**
+This project contains the firmware for an **ESP32** acting as a secure "Root of Trust" (RoT) edge device. It captures sensor data, cryptographically signs it using **ECDSA**, and transmits it to a gateway via **MQTT**.
 
 ---
 
-### Phase 1: Store the Private Key in NVS
+## 🛠 Features
 
-Before running the main logic, you must "provision" the device. This process runs **once** to save your ECC Private Key into the ESP32's secure NVS area.
-
-- **File Reference:** [`prerun.cpp`](./prerun.cpp)
-- **Action:** Open `prerun.cpp`, insert your actual ECC Private Key (in PEM format), and flash this sketch to your ESP32.
-- **Result:** The private key is safely stored under the `security` namespace, and you are ready for Phase 2.
-
-> [!WARNING]
-> Ensure you keep the newline (`\n`) characters in your PEM-formatted key when pasting it into the provisioning script!
+- **Hardware-Level Security**: Uses the ESP32's Non-Volatile Storage (NVS) to securely store network credentials and private keys.
+- **Cryptographic Integrity**: 
+  - **SHA-256**: Generates a unique hash for every sensor reading.
+  - **ECDSA Signing**: Signs the hash using a private key (mbedTLS) to ensure authenticity.
+- **Robust Communication**: Uses MQTT protocol for lightweight and reliable data transmission.
+- **JSON Payload**: Sends structured data containing the Device ID, Temperature, Hash, and Signature.
 
 ---
 
-### Phase 2: The Main Secure MQTT Logic
+## 🏗 System Architecture
 
-Once provisioned, the main firmware runs continuously to securely capture and transmit data.
-
-- **File Reference:** [`index.cpp`](./index.cpp)
-
-**The Firmware Lifecycle:**
-1. **Retrieve:** Fetches the private key securely from NVS.
-2. **Generate:** Captures sensor data (e.g., temperature).
-3. **Hash:** Hashes the payload using **SHA-256**.
-4. **Sign:** Signs the hash with your ECC key via **ECDSA**.
-5. **Publish:** Transmits the data, hash, and signature as a JSON payload over MQTT.
-
-**Required Libraries:**
-- `PubSubClient` (by Nick O'Leary)
-- `ArduinoJson` (by Benoit Blanchon)
-- `mbedtls` (Built-in to ESP32 core)
+1.  **Provisioning**: Credentials and keys are flashed into the NVS partition (once).
+2.  **Sensing**: The device reads environmental data (e.g., Temperature).
+3.  **Signing**: A hash is generated and signed on-device.
+4.  **Publishing**: The signed packet is sent to the Raspberry Pi Gateway for blockchain verification.
 
 ---
 
-### Phase 3: Setting Up the Gateway (Raspberry Pi)
+## 📋 Prerequisites
 
-To bridge this to the blockchain (as per your Hybrid Framework), the Gateway (Raspberry Pi) must be configured to receive and verify the data.
+### Hardware
+- ESP32 Development Board (e.g., NodeMCU, DevKitV1)
+- Micro-USB cable
+- (Optional) DHT11/22 Sensor (The current code uses simulated data)
 
-#### 1. Install Mosquitto (The Broker)
+### Software (Arduino IDE / PlatformIO)
+- **Libraries**:
+  - `PubSubClient` (for MQTT)
+  - `ArduinoJson` (for JSON formatting)
+  - `Preferences` (included in ESP32 core)
+  - `mbedtls` (included in ESP32 core)
 
-Run the following commands on your Pi to install and enable the MQTT broker:
+---
 
+## 🚀 Installation & Setup
+
+### 1. Provisioning (NVS Setup)
+Before running the main firmware, you must provision the device with your network credentials and a private key.
+
+#### Key Generation (ECC)
+The ESP32 requires an **ECC (secp256r1)** private key for signing.
 ```bash
-sudo apt update
-sudo apt install mosquitto mosquitto-clients
-sudo systemctl enable mosquitto
+# 1. Generate the key
+openssl ecparam -name prime256v1 -genkey -noout -out private.pem
+
+# 2. View the key text
+cat private.pem
 ```
 
-> [!NOTE]
-> Ensure `/etc/mosquitto/mosquitto.conf` allows external connections by adding `listener 1883` and `allow_anonymous true`.
+#### Formatting Requirement
+The `mbedtls` library is very strict. You must include the header, footer, and `\n` characters exactly:
+```cpp
+const char* my_private_key = 
+  "-----BEGIN EC PRIVATE KEY-----\n"
+  "MHQCAQEEIFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+  "-----END EC PRIVATE KEY-----";
+```
 
-#### 2. The Verification Script (Python)
+1.  Open `prerun.cpp`.
+2.  Update your `ssid`, `password`, `mqtt_server`, and `priv_key`.
+3.  Upload this sketch to the ESP32 to save these values into the **"security"** NVS namespace.
 
-The Pi uses a Python script to receive the MQTT message, verify the signature against the ESP32's Public Key, and securely log the hash to your local blockchain (e.g., Ganache).
-
-- **File Reference:** [`verification-script.py`](./verification-script.py)
-- **Action:** Run this script on your Pi to start listening for incoming ESP32 payloads. Valid payloads will have their hashes sent to the ledger.
+### 2. Main Firmware
+1.  Open `index.cpp`.
+2.  Ensure you have the required libraries installed.
+3.  Select the correct ESP32 board and COM port.
+4.  Upload the code.
 
 ---
 
-## ✅ Summary Checklist
+## 📡 MQTT Payload Structure
 
-- [ ] **Generate Keys:** Use OpenSSL to create an ECC P-256 key pair.
-- [ ] **Provision:** Flash the `prerun.cpp` sketch to save the Private Key to the ESP32's NVS.
-- [ ] **Deploy Main Code:** Flash the `index.cpp` main logic to the ESP32.
-- [ ] **Gateway Setup:** Run Mosquitto and `verification-script.py` on the Raspberry Pi.
-- [ ] **Verify:** Watch the Pi's console; you should see the JSON arrive with a hex signature, which the Pi then prepares for the blockchain.
+The device publishes to the `sensor/data` topic with the following JSON format:
+
+```json
+{
+  "deviceId": "ESP32_01",
+  "temperature": 25.5,
+  "hash": "b5ac...",
+  "signature": "3045..."
+}
+```
 
 ---
-*Built for the Secure Edge-to-Cloud IoT Framework.*
+
+## 📂 Project Structure
+
+```text
+esp32/
+├── index.cpp               # Main firmware logic (Signing & Publishing)
+├── prerun.cpp              # Provisioning script for NVS credentials
+├── verification-script.py  # Python tool for offline signature verification
+├── .env                    # Configuration template
+└── README.md               # This file
+```
+
+---
+
+## 🔒 Security Workflow
+
+| Component | Responsibility |
+| :--- | :--- |
+| **NVS** | Secure storage of the Private Key. |
+| **mbedTLS** | Execution of ECDSA (secp256r1) signing. |
+| **SHA-256** | Ensuring data hasn't been modified in transit. |
+
+---
+
+## 📄 License
+[ISC](https://choosealicense.com/licenses/isc/)
