@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { ethers } from 'ethers';
-import { Shield, ShieldAlert, Activity, Database, Key, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Shield, ShieldAlert, Activity, Database, Key, CheckCircle, XCircle, AlertTriangle, Search, Filter } from 'lucide-react';
 import { getContract, CONTRACT_ADDRESS } from './contractConfig';
 
 // Assume socket server is on localhost:3001
@@ -15,6 +15,17 @@ function App() {
   const [networkStatus, setNetworkStatus] = useState('Disconnected');
   const [tamperAlerts, setTamperAlerts] = useState({});
   const [isAuthorizing, setIsAuthorizing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [filterDevice, setFilterDevice] = useState('');
+  const [filterStatus, setFilterStatus] = useState('All');
+
+  // Derived: filtered view of logs
+  const filteredLogs = logs.filter(log => {
+    const matchDevice = filterDevice === '' || (log.deviceId || '').toLowerCase().includes(filterDevice.toLowerCase());
+    const matchStatus = filterStatus === 'All' || log.status === filterStatus;
+    return matchDevice && matchStatus;
+  });
 
   useEffect(() => {
     // Initialize Web3
@@ -33,6 +44,7 @@ function App() {
     // Listen to mock or real socket events
     socket.on('newLog', (log) => {
       setLogs((prev) => [log, ...prev].slice(0, 50));
+      setCurrentPage(1); // jump to newest on incoming log
       setStats((prev) => {
         const isVerified = log.status === 'Verified';
         return {
@@ -125,7 +137,7 @@ function App() {
       </header>
 
       <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-8">
-        
+
         {/* Left Sidebar */}
         <div className="lg:col-span-1 flex flex-col gap-6">
           {/* Stats Overview */}
@@ -187,13 +199,92 @@ function App() {
                 <Database className="w-5 h-5 mr-2 text-indigo-400" />
                 Live Security Feed
               </h2>
-              <span className="flex h-3 w-3 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
-              </span>
+              <div className="flex items-center space-x-3">
+                {/* Live indicator */}
+                <span className="flex h-3 w-3 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                </span>
+                {/* Page-size selector */}
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs text-gray-500">Rows:</span>
+                  <select
+                    id="page-size-select"
+                    value={pageSize}
+                    onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                    className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 cursor-pointer"
+                  >
+                    <option value={5}>5</option>
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                  </select>
+                </div>
+              </div>
             </div>
-            
-            <div className="overflow-x-auto">
+
+            {/* Filter Bar */}
+            <div className="px-6 py-3 border-b border-gray-800 bg-gray-950/40 flex flex-wrap gap-3 items-center">
+              {/* Device search */}
+              <div className="relative flex-1 min-w-[160px] max-w-xs">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" />
+                <input
+                  id="filter-device-input"
+                  type="text"
+                  placeholder="Search device ID…"
+                  value={filterDevice}
+                  onChange={e => { setFilterDevice(e.target.value); setCurrentPage(1); }}
+                  className="w-full bg-gray-800/60 border border-gray-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all"
+                />
+                {filterDevice && (
+                  <button
+                    onClick={() => { setFilterDevice(''); setCurrentPage(1); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                    aria-label="Clear device filter"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {/* Status pills */}
+              <div className="flex items-center space-x-1">
+                <Filter className="w-3.5 h-3.5 text-gray-500 mr-1" />
+                {['All', 'Verified', 'Pending', 'Rejected/Unauthorized'].map(status => {
+                  const active = filterStatus === status;
+                  const colorMap = {
+                    All: active ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
+                    Verified: active ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
+                    Pending: active ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
+                    'Rejected/Unauthorized': active ? 'bg-rose-500/20 border-rose-500/50 text-rose-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
+                  };
+                  return (
+                    <button
+                      key={status}
+                      id={`filter-status-${status.toLowerCase()}`}
+                      onClick={() => { setFilterStatus(status); setCurrentPage(1); }}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${colorMap[status]}`}
+                    >
+                      {status}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Active filter summary */}
+              {(filterDevice || filterStatus !== 'All') && (
+                <span className="text-xs text-gray-500 ml-auto">
+                  {filteredLogs.length} result{filteredLogs.length !== 1 ? 's' : ''}
+                  <button
+                    onClick={() => { setFilterDevice(''); setFilterStatus('All'); setCurrentPage(1); }}
+                    className="ml-2 text-indigo-400 hover:text-indigo-300 transition-colors underline"
+                  >
+                    Clear all
+                  </button>
+                </span>
+              )}
+            </div>
+
+            <div className="overflow-x-auto flex-1">
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-gray-400 bg-gray-950/50 uppercase border-b border-gray-800">
                   <tr>
@@ -215,64 +306,161 @@ function App() {
                         </div>
                       </td>
                     </tr>
+                  ) : filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
+                        <div className="flex flex-col items-center justify-center space-y-3">
+                          <Filter className="w-10 h-10 text-gray-700" />
+                          <p>No logs match the current filters.</p>
+                        </div>
+                      </td>
+                    </tr>
                   ) : (
-                    logs.map((log, idx) => (
-                      <tr key={idx} className="hover:bg-gray-800/30 transition-colors group">
-                        <td className="px-6 py-4 whitespace-nowrap text-gray-400 font-mono text-xs">
-                          {new Date(log.timestamp).toLocaleTimeString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-300">
-                          {log.deviceId}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="bg-gray-800 text-gray-300 py-1 px-2 rounded font-mono">
-                            {log.temp}°C
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap font-mono text-xs text-gray-500" title={log.hash}>
-                          {log.hash ? `${log.hash.substring(0, 10)}...` : 'N/A'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {log.status === 'Verified' ? (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              <CheckCircle className="w-3 h-3 mr-1" /> Verified
-                            </span>
-                          ) : log.status === 'Pending' ? (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                              <Activity className="w-3 h-3 mr-1 animate-spin" /> Pending
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                              <XCircle className="w-3 h-3 mr-1" /> Rejected
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          {tamperAlerts[idx] === 'verified' ? (
-                            <span className="inline-flex items-center text-emerald-400 text-xs font-medium">
-                              <CheckCircle className="w-4 h-4 mr-1" /> Match
-                            </span>
-                          ) : tamperAlerts[idx] === 'tampered' ? (
-                            <span className="inline-flex items-center text-rose-500 text-xs font-bold animate-pulse">
-                              <AlertTriangle className="w-4 h-4 mr-1" /> TAMPER ALERT
-                            </span>
-                          ) : tamperAlerts[idx] === 'error' ? (
-                            <span className="text-gray-500 text-xs">Error</span>
-                          ) : (
-                            <button
-                              onClick={() => handleIntegrityCheck(log.deviceId, log.hash, idx)}
-                              className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            >
-                              Verify
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                    (() => {
+                      const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
+                      const safePage = Math.min(currentPage, totalPages);
+                      const pageStart = (safePage - 1) * pageSize;
+                      const pageLogs = filteredLogs.slice(pageStart, pageStart + pageSize);
+                      return pageLogs.map((log, relIdx) => {
+                        const globalIdx = pageStart + relIdx;
+                        const alertKey = log._id || globalIdx;
+                        return (
+                          <tr key={log._id || globalIdx} className="hover:bg-gray-800/30 transition-colors group">
+                            <td className="px-6 py-4 whitespace-nowrap text-gray-400 font-mono text-xs">
+                              {new Date(log.timestamp).toLocaleTimeString()}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-300">
+                              {log.deviceId}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className="bg-gray-800 text-gray-300 py-1 px-2 rounded font-mono">
+                                {log.temp}°C
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap font-mono text-xs text-gray-500" title={log.hash}>
+                              {log.hash ? `${log.hash.substring(0, 10)}...` : 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {log.status === 'Verified' ? (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                  <CheckCircle className="w-3 h-3 mr-1" /> Verified
+                                </span>
+                              ) : log.status === 'Pending' ? (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                  <Activity className="w-3 h-3 mr-1 animate-spin" /> Pending
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                  <XCircle className="w-3 h-3 mr-1" /> Rejected
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right">
+                              {tamperAlerts[alertKey] === 'verified' ? (
+                                <span className="inline-flex items-center text-emerald-400 text-xs font-medium">
+                                  <CheckCircle className="w-4 h-4 mr-1" /> Match
+                                </span>
+                              ) : tamperAlerts[alertKey] === 'tampered' ? (
+                                <span className="inline-flex items-center text-rose-500 text-xs font-bold animate-pulse">
+                                  <AlertTriangle className="w-4 h-4 mr-1" /> TAMPER ALERT
+                                </span>
+                              ) : tamperAlerts[alertKey] === 'error' ? (
+                                <span className="text-gray-500 text-xs">Error</span>
+                              ) : (
+                                <button
+                                  onClick={() => handleIntegrityCheck(log.deviceId, log.hash, alertKey)}
+                                  className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                >
+                                  Verify
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()
                   )}
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Footer */}
+            {filteredLogs.length > 0 && (() => {
+              const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
+              const safePage = Math.min(currentPage, totalPages);
+              const pageStart = (safePage - 1) * pageSize;
+              return (
+                <div className="px-6 py-4 border-t border-gray-800 bg-gray-900/80 flex items-center justify-between">
+                  <p className="text-xs text-gray-500">
+                    Showing <span className="text-gray-300 font-medium">{pageStart + 1}</span>–<span className="text-gray-300 font-medium">{Math.min(pageStart + pageSize, filteredLogs.length)}</span> of <span className="text-gray-300 font-medium">{filteredLogs.length}</span> {filterDevice || filterStatus !== 'All' ? 'filtered' : ''} entries
+                  </p>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      id="pagination-first"
+                      onClick={() => setCurrentPage(1)}
+                      disabled={safePage === 1}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-700 text-gray-400 hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                      title="First page"
+                    >
+                      «
+                    </button>
+                    <button
+                      id="pagination-prev"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={safePage === 1}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-700 text-gray-400 hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    >
+                      ‹ Prev
+                    </button>
+
+                    {/* Page number pills */}
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+                      .reduce((acc, p, i, arr) => {
+                        if (i > 0 && p - arr[i - 1] > 1) acc.push('...');
+                        acc.push(p);
+                        return acc;
+                      }, [])
+                      .map((item, i) =>
+                        item === '...' ? (
+                          <span key={`ellipsis-${i}`} className="px-2 text-gray-600 text-xs">…</span>
+                        ) : (
+                          <button
+                            key={item}
+                            id={`pagination-page-${item}`}
+                            onClick={() => setCurrentPage(item)}
+                            className={`w-8 h-8 rounded-lg text-xs font-medium border transition-all ${item === safePage
+                              ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
+                              : 'border-gray-700 text-gray-400 hover:bg-gray-700/50'
+                              }`}
+                          >
+                            {item}
+                          </button>
+                        )
+                      )
+                    }
+
+                    <button
+                      id="pagination-next"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={safePage === totalPages}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-700 text-gray-400 hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    >
+                      Next ›
+                    </button>
+                    <button
+                      id="pagination-last"
+                      onClick={() => setCurrentPage(totalPages)}
+                      disabled={safePage === totalPages}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-gray-700 text-gray-400 hover:bg-gray-700/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                      title="Last page"
+                    >
+                      »
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
