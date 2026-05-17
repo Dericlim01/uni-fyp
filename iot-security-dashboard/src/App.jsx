@@ -15,6 +15,7 @@ function App() {
   const [networkStatus, setNetworkStatus] = useState('Disconnected');
   const [tamperAlerts, setTamperAlerts] = useState({});
   const [isAuthorizing, setIsAuthorizing] = useState(false);
+  const [isAuditing, setIsAuditing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [filterDevice, setFilterDevice] = useState('');
@@ -43,7 +44,7 @@ function App() {
 
     // Listen to mock or real socket events
     socket.on('newLog', (log) => {
-      setLogs((prev) => [log, ...prev].slice(0, 50));
+      setLogs((prev) => [log, ...prev]);
       setCurrentPage(1); // jump to newest on incoming log
       setStats((prev) => {
         const isVerified = log.status === 'Verified';
@@ -57,24 +58,26 @@ function App() {
 
     socket.on('initialLogs', (initialLogs) => {
       setLogs(initialLogs);
-      // Calculate stats based on initial logs
-      let total = initialLogs.length;
-      let verified = 0;
-      let blocked = 0;
-      initialLogs.forEach(log => {
-        if (log.status === 'Verified') verified++;
-        else blocked++;
-      });
-      setStats(prev => ({
-        total: prev.total + total,
-        verified: prev.verified + verified,
-        blocked: prev.blocked + blocked
-      }));
+    });
+
+    // Receive accurate stats from the gateway (counts from full database)
+    socket.on('statsUpdate', (newStats) => {
+      setStats(newStats);
+    });
+
+    // Listen for batch integrity audit results
+    socket.on('verifyAllResults', (results) => {
+      const alertMap = {};
+      results.forEach(r => { alertMap[r.logId] = r.status; });
+      setTamperAlerts(prev => ({ ...prev, ...alertMap }));
+      setIsAuditing(false);
     });
 
     return () => {
       socket.off('newLog');
       socket.off('initialLogs');
+      socket.off('statsUpdate');
+      socket.off('verifyAllResults');
     };
   }, []);
 
@@ -92,6 +95,12 @@ function App() {
       alert("Authorization failed. Ensure you are the admin.");
     }
     setIsAuthorizing(false);
+  };
+
+  const handleVerifyAll = () => {
+    setIsAuditing(true);
+    setTamperAlerts({});
+    socket.emit('verifyAll');
   };
 
   const handleIntegrityCheck = async (deviceId, localHash, logId) => {
@@ -189,11 +198,44 @@ function App() {
               </button>
             </form>
           </div>
+
+          {/* Database Integrity Audit */}
+          <div className="bg-gray-900/50 backdrop-blur-md rounded-2xl p-6 border border-gray-800 shadow-xl">
+            <h2 className="text-lg font-semibold mb-4 flex items-center text-gray-100">
+              <ShieldAlert className="w-5 h-5 mr-2 text-indigo-400" />
+              Database Audit
+            </h2>
+            <p className="text-xs text-gray-400 mb-4">
+              Verify all MongoDB records by recomputing their SHA-256 hashes. Detects if data was manually tampered in the database.
+            </p>
+            <button
+              onClick={handleVerifyAll}
+              disabled={isAuditing}
+              className="w-full bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white font-bold py-3 px-4 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
+            >
+              {isAuditing ? 'Auditing...' : 'Verify All Records'}
+            </button>
+            {Object.keys(tamperAlerts).length > 0 && (
+              <div className="mt-4 p-3 rounded-lg border text-xs font-medium" style={{
+                background: Object.values(tamperAlerts).some(v => v === 'tampered')
+                  ? 'rgba(244, 63, 94, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                borderColor: Object.values(tamperAlerts).some(v => v === 'tampered')
+                  ? 'rgba(244, 63, 94, 0.3)' : 'rgba(16, 185, 129, 0.3)',
+                color: Object.values(tamperAlerts).some(v => v === 'tampered')
+                  ? '#fb7185' : '#6ee7b7'
+              }}>
+                {Object.values(tamperAlerts).filter(v => v === 'tampered').length > 0
+                  ? `🚨 ${Object.values(tamperAlerts).filter(v => v === 'tampered').length} tampered record(s) found!`
+                  : `✅ All ${Object.values(tamperAlerts).length} records verified — no tampering detected.`
+                }
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Content - Live Security Feed */}
         <div className="lg:col-span-3">
-          <div className="bg-gray-900/50 backdrop-blur-md rounded-2xl border border-gray-800 shadow-xl overflow-hidden h-full flex flex-col">
+          <div className="bg-gray-900/50 backdrop-blur-md rounded-2xl border border-gray-800 shadow-xl overflow-hidden">
             <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-900/80">
               <h2 className="text-lg font-semibold flex items-center text-gray-100">
                 <Database className="w-5 h-5 mr-2 text-indigo-400" />
@@ -249,13 +291,14 @@ function App() {
               {/* Status pills */}
               <div className="flex items-center space-x-1">
                 <Filter className="w-3.5 h-3.5 text-gray-500 mr-1" />
-                {['All', 'Verified', 'Pending', 'Rejected/Unauthorized'].map(status => {
+                {['All', 'Verified', 'Pending', 'Rejected/Unauthorized', 'Rejected/Tampered'].map(status => {
                   const active = filterStatus === status;
                   const colorMap = {
                     All: active ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
                     Verified: active ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
                     Pending: active ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
                     'Rejected/Unauthorized': active ? 'bg-rose-500/20 border-rose-500/50 text-rose-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
+                    'Rejected/Tampered': active ? 'bg-orange-500/20 border-orange-500/50 text-orange-300' : 'border-gray-700 text-gray-400 hover:bg-gray-700/50',
                   };
                   return (
                     <button
@@ -284,7 +327,7 @@ function App() {
               )}
             </div>
 
-            <div className="overflow-x-auto flex-1">
+            <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-gray-400 bg-gray-950/50 uppercase border-b border-gray-800">
                   <tr>
@@ -348,6 +391,10 @@ function App() {
                               ) : log.status === 'Pending' ? (
                                 <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
                                   <Activity className="w-3 h-3 mr-1 animate-spin" /> Pending
+                                </span>
+                              ) : log.status === 'Rejected/Tampered' ? (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                                  <AlertTriangle className="w-3 h-3 mr-1" /> Tampered
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">

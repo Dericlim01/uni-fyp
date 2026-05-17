@@ -35,7 +35,7 @@ const DataLog = mongoose.model('DataLog', LogSchema);
 io.on('connection', async (socket) => {
   console.log("🟢 Frontend connected to Socket.io");
   try {
-    const logs = await DataLog.find().sort({ timestamp: -1 }).limit(50);
+    const logs = await DataLog.find().sort({ timestamp: -1 });
     // Map them to include their saved status
     const formattedLogs = logs.map(log => {
       return {
@@ -44,10 +44,70 @@ io.on('connection', async (socket) => {
         temp: log.temperature
       };
     });
+
+    // Get total stats from the FULL database, not just the 50 displayed
+    const totalCount = await DataLog.countDocuments();
+    const verifiedCount = await DataLog.countDocuments({ status: 'Verified' });
+    const blockedCount = totalCount - verifiedCount;
+
     socket.emit('initialLogs', formattedLogs);
+    socket.emit('statsUpdate', { total: totalCount, verified: verifiedCount, blocked: blockedCount });
   } catch (err) {
     console.error("❌ Error fetching initial logs:", err);
   }
+
+  // Database Integrity Audit — verify all MongoDB records against their stored hashes
+  // Detects if anyone manually tampered with data in the database
+  socket.on('verifyAll', async () => {
+    console.log("🔍 Database integrity audit requested...");
+    try {
+      const allLogs = await DataLog.find().sort({ timestamp: -1 });
+      const results = [];
+
+      for (const log of allLogs) {
+        const logId = log._id.toString();
+
+        // Recompute hash from stored data fields (same formula as ESP32)
+        const rawData = String(log.deviceId) + log.temperature.toFixed(2) + String(log.deviceTimestamp);
+        const recomputedHash = crypto.createHash('sha256').update(rawData).digest('hex');
+
+        if (recomputedHash === log.hash) {
+          results.push({ logId, status: 'verified' });
+        } else {
+          // Update status in MongoDB permanently
+          log.status = 'Rejected/Tampered';
+          await log.save();
+          results.push({ logId, status: 'tampered' });
+          console.warn(`🚨 DB Tampering detected! Record ${logId}: stored hash doesn't match recomputed hash`);
+          console.warn(`   Expected: ${recomputedHash}`);
+          console.warn(`   Found:    ${log.hash}`);
+        }
+      }
+
+      const tamperedCount = results.filter(r => r.status === 'tampered').length;
+      console.log(`✅ Audit complete: ${results.length} records checked, ${tamperedCount} tampered`);
+      socket.emit('verifyAllResults', results);
+
+      // Refresh the logs on the frontend so the updated status is visible
+      if (tamperedCount > 0) {
+        const refreshedLogs = await DataLog.find().sort({ timestamp: -1 });
+        const formattedLogs = refreshedLogs.map(log => ({
+          ...log.toObject(),
+          status: log.status,
+          temp: log.temperature
+        }));
+        socket.emit('initialLogs', formattedLogs);
+
+        // Refresh stats from full database
+        const totalCount = await DataLog.countDocuments();
+        const verifiedCount = await DataLog.countDocuments({ status: 'Verified' });
+        socket.emit('statsUpdate', { total: totalCount, verified: verifiedCount, blocked: totalCount - verifiedCount });
+      }
+    } catch (err) {
+      console.error("❌ Audit error:", err);
+      socket.emit('verifyAllResults', []);
+    }
+  });
 });
 
 server.listen(3001, () => {
