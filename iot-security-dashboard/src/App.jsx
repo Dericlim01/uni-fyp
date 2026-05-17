@@ -42,7 +42,26 @@ function App() {
     };
     initWeb3();
 
-    // Listen to mock or real socket events
+    // Listen for MetaMask account/network changes — auto-reconnect
+    let handleAccountsChanged, handleChainChanged;
+    if (window.ethereum) {
+      handleAccountsChanged = (accounts) => {
+        if (accounts.length > 0) {
+          initWeb3(); // Re-connect when user connects or switches account
+        } else {
+          setContract(null);
+          setNetworkStatus('Disconnected');
+        }
+      };
+      handleChainChanged = () => {
+        initWeb3(); // Re-connect on network switch
+      };
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+    }
+
+    // Listen to socket events
     socket.on('newLog', (log) => {
       setLogs((prev) => [log, ...prev]);
       setCurrentPage(1); // jump to newest on incoming log
@@ -73,7 +92,12 @@ function App() {
       setIsAuditing(false);
     });
 
+    // Cleanup all listeners on unmount
     return () => {
+      if (window.ethereum) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+      }
       socket.off('newLog');
       socket.off('initialLogs');
       socket.off('statsUpdate');
@@ -103,11 +127,14 @@ function App() {
     socket.emit('verifyAll');
   };
 
-  const handleIntegrityCheck = async (deviceId, localHash, logId) => {
-    if (!contract) return;
+  const handleIntegrityCheck = (deviceId, localHash, logId, temperature, deviceTimestamp) => {
     try {
-      const onChainHash = await contract.getLatestHash(deviceId);
-      if (onChainHash === localHash) {
+      // Recompute hash from the record's data (same formula as ESP32 & gateway)
+      // SHA256(deviceId + temperature[2dp] + deviceTimestamp)
+      const rawData = String(deviceId) + Number(temperature).toFixed(2) + String(deviceTimestamp);
+      const recomputedHash = ethers.sha256(ethers.toUtf8Bytes(rawData)).slice(2); // remove 0x prefix
+
+      if (recomputedHash === localHash) {
         setTamperAlerts(prev => ({ ...prev, [logId]: 'verified' }));
       } else {
         setTamperAlerts(prev => ({ ...prev, [logId]: 'tampered' }));
@@ -415,7 +442,7 @@ function App() {
                                 <span className="text-gray-500 text-xs">Error</span>
                               ) : (
                                 <button
-                                  onClick={() => handleIntegrityCheck(log.deviceId, log.hash, alertKey)}
+                                  onClick={() => handleIntegrityCheck(log.deviceId, log.hash, alertKey, log.temp || log.temperature, log.deviceTimestamp)}
                                   className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-3 py-1.5 rounded transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                                 >
                                   Verify
