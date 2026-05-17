@@ -1,6 +1,7 @@
 import mqtt from 'mqtt';
 import { ethers } from 'ethers';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import http from 'http';
@@ -23,6 +24,7 @@ mongoose.connect(process.env.mongodb_url).catch(err => {
 const LogSchema = new mongoose.Schema({
   deviceId: String,
   temperature: Number,
+  deviceTimestamp: Number,
   hash: { type: String, unique: true },
   status: { type: String, default: 'Pending' },
   timestamp: { type: Date, default: Date.now }
@@ -73,14 +75,60 @@ client.on('connect', () => {
 
 client.on('message', async (topic, message) => {
   const data = JSON.parse(message.toString());
+  console.log(`📩 Received message on ${topic}: ${message}`);
 
   try {
-    // Try to archive in MongoDB first
+    // Check if device is whitelisted on the smart contract BEFORE saving
+    const isWhitelisted = await contract.whitelistedDevices(data.deviceId);
+    console.log(`🔍 Whitelist check for ${data.deviceId}: ${isWhitelisted}`);
+
+    if (!isWhitelisted) {
+      console.warn(`🚫 Device ${data.deviceId} is NOT whitelisted. Rejecting data.`);
+
+      // Save to MongoDB as rejected for audit trail
+      const rejectedLog = new DataLog(data);
+      rejectedLog.status = 'Rejected/Unauthorized';
+      await rejectedLog.save();
+
+      io.emit('newLog', {
+        ...data,
+        temp: data.temperature,
+        timestamp: rejectedLog.timestamp,
+        status: 'Rejected/Unauthorized'
+      });
+      return; // Stop here — do NOT send to blockchain
+    }
+
+    // Verify hash integrity (detect data tampering)
+    // ESP32 computes: SHA256(deviceId + temperature + deviceTimestamp)
+    const rawData = String(data.deviceId) + data.temperature.toFixed(2) + String(data.deviceTimestamp);
+    const expectedHash = crypto.createHash('sha256').update(rawData).digest('hex');
+    console.log(`🔐 Hash check — Expected: ${expectedHash} | Received: ${data.hash}`);
+
+    if (expectedHash !== data.hash) {
+      console.warn(`🚨 Data tampering detected for ${data.deviceId}! Hash mismatch.`);
+
+      const tamperedLog = new DataLog(data);
+      tamperedLog.status = 'Rejected/Tampered';
+      await tamperedLog.save();
+
+      io.emit('newLog', {
+        ...data,
+        temp: data.temperature,
+        timestamp: tamperedLog.timestamp,
+        status: 'Rejected/Tampered'
+      });
+      return; // Stop here — tampered data
+    }
+
+    console.log(`✅ Hash integrity verified for ${data.deviceId}`);
+
+    // Device is whitelisted & hash verified — archive in MongoDB
     const newLog = new DataLog(data);
     await newLog.save();
     console.log("✅ Archived in MongoDB (Off-Chain)");
 
-    // ONLY if MongoDB succeeds (means it's not a duplicate), send to Blockchain
+    // Store hash on blockchain (device whitelisted & data integrity confirmed)
     try {
       const tx = await contract.storeHash(data.deviceId, data.hash);
       await tx.wait();
