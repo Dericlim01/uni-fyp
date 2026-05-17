@@ -16,6 +16,12 @@ contract HybridSecurity {
         whitelistedDevices[_deviceId] = true;
     }
 
+    // Remove a device from the whitelist
+    function revokeDevice(string memory _deviceId) public {
+        require(msg.sender == admin, "Only admin can revoke");
+        whitelistedDevices[_deviceId] = false;
+    }
+
     // Store the hash if the device is whitelisted
     function storeHash(string memory _deviceId, string memory _hash) public {
         require(whitelistedDevices[_deviceId], "Device not whitelisted!");

@@ -30,3 +30,5 @@
 
 # Snapshot cheatcodes output
 /snapshots
+
+/ignition/deployments/chain-31337

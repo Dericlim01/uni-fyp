@@ -16,6 +16,8 @@ function App() {
   const [tamperAlerts, setTamperAlerts] = useState({});
   const [isAuthorizing, setIsAuthorizing] = useState(false);
   const [isAuditing, setIsAuditing] = useState(false);
+  const [whitelistResult, setWhitelistResult] = useState(null);
+  const [actionMessage, setActionMessage] = useState(null); // { type: 'success'|'error'|'info', text: '' }
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [filterDevice, setFilterDevice] = useState('');
@@ -105,18 +107,26 @@ function App() {
     };
   }, []);
 
-  const handleAuthorize = async (e) => {
-    e.preventDefault();
+  const handleAuthorize = async () => {
     if (!contract || !adminDeviceId) return;
     setIsAuthorizing(true);
+    setActionMessage(null);
     try {
+      // Check if device is already whitelisted
+      const alreadyWhitelisted = await contract.whitelistedDevices(adminDeviceId);
+      if (alreadyWhitelisted) {
+        setWhitelistResult(true);
+        setIsAuthorizing(false);
+        return;
+      }
+
       const tx = await contract.authorizeDevice(adminDeviceId);
       await tx.wait();
-      alert(`Successfully authorized ${adminDeviceId}`);
-      setAdminDeviceId('');
+      setActionMessage({ type: 'success', text: `Successfully authorized ${adminDeviceId}` });
+      setWhitelistResult(true);
     } catch (error) {
       console.error(error);
-      alert("Authorization failed. Ensure you are the admin.");
+      setActionMessage({ type: 'error', text: 'Authorization failed. Ensure you are the admin.' });
     }
     setIsAuthorizing(false);
   };
@@ -125,6 +135,33 @@ function App() {
     setIsAuditing(true);
     setTamperAlerts({});
     socket.emit('verifyAll');
+  };
+
+  const handleCheckWhitelist = async () => {
+    if (!contract || !adminDeviceId) return;
+    setActionMessage(null);
+    try {
+      const isWhitelisted = await contract.whitelistedDevices(adminDeviceId);
+      setWhitelistResult(isWhitelisted);
+    } catch (error) {
+      console.error(error);
+      setWhitelistResult(null);
+      setActionMessage({ type: 'error', text: 'Failed to check whitelist status.' });
+    }
+  };
+
+  const handleRevokeDevice = async () => {
+    if (!contract || !adminDeviceId) return;
+    setActionMessage(null);
+    try {
+      const tx = await contract.revokeDevice(adminDeviceId);
+      await tx.wait();
+      setWhitelistResult(false);
+      setActionMessage({ type: 'success', text: `Successfully revoked ${adminDeviceId}` });
+    } catch (error) {
+      console.error(error);
+      setActionMessage({ type: 'error', text: 'Revoke failed. Ensure you are the admin.' });
+    }
   };
 
   const handleIntegrityCheck = (deviceId, localHash, logId, temperature, deviceTimestamp) => {
@@ -198,32 +235,77 @@ function App() {
             </div>
           </div>
 
-          {/* Admin Panel */}
+          {/* Device Management */}
           <div className="bg-gray-900/50 backdrop-blur-md rounded-2xl p-6 border border-gray-800 shadow-xl">
             <h2 className="text-lg font-semibold mb-4 flex items-center text-gray-100">
               <Key className="w-5 h-5 mr-2 text-amber-400" />
-              Admin Control
+              Device Management
             </h2>
-            <p className="text-xs text-gray-400 mb-4">Whitelist a new IoT device by its ID directly on the blockchain.</p>
-            <form onSubmit={handleAuthorize} className="space-y-4">
-              <div>
-                <input
-                  type="text"
-                  placeholder="Device ID (e.g. ESP32_01)"
-                  value={adminDeviceId}
-                  onChange={(e) => setAdminDeviceId(e.target.value)}
-                  className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition-all text-gray-200 placeholder-gray-600"
-                  required
-                />
-              </div>
+            <p className="text-xs text-gray-400 mb-4">Manage IoT device access on the blockchain.</p>
+
+            <input
+              type="text"
+              placeholder="Device ID (e.g. ESP32_01)"
+              value={adminDeviceId}
+              onChange={(e) => { setAdminDeviceId(e.target.value); setWhitelistResult(null); }}
+              className="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition-all text-gray-200 placeholder-gray-600 mb-3"
+            />
+
+            <div className="flex gap-2 mb-3">
               <button
-                type="submit"
-                disabled={isAuthorizing || !contract}
-                className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-gray-950 font-bold py-3 px-4 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-amber-500/20"
+                onClick={handleAuthorize}
+                disabled={isAuthorizing || !contract || !adminDeviceId}
+                className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-gray-950 font-bold py-2.5 px-3 rounded-lg text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-amber-500/20"
               >
-                {isAuthorizing ? 'Authorizing...' : 'Authorize Device'}
+                {isAuthorizing ? 'Authorizing...' : 'Authorize'}
               </button>
-            </form>
+              <button
+                onClick={handleCheckWhitelist}
+                disabled={!contract || !adminDeviceId}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-gray-950 font-bold py-2.5 px-3 rounded-lg text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-cyan-500/20"
+              >
+                Check Status
+              </button>
+            </div>
+
+            {(whitelistResult !== null || actionMessage) && (
+              <div className="space-y-2">
+                {whitelistResult !== null && (
+                  <div className={`p-3 rounded-lg border text-xs font-medium ${
+                    whitelistResult
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
+                    <div className="flex items-center">
+                      {whitelistResult
+                        ? <><CheckCircle className="w-4 h-4 mr-2" /> {adminDeviceId} is whitelisted</>
+                        : <><XCircle className="w-4 h-4 mr-2" /> {adminDeviceId} is NOT whitelisted</>
+                      }
+                    </div>
+                    {whitelistResult && (
+                      <button
+                        onClick={handleRevokeDevice}
+                        className="mt-2 w-full bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 text-white font-bold py-2 px-3 rounded-lg text-xs transition-all shadow-lg shadow-rose-500/20"
+                      >
+                        Revoke Device
+                      </button>
+                    )}
+                  </div>
+                )}
+                {actionMessage && (
+                  <div className={`p-3 rounded-lg border text-xs font-medium flex items-center ${
+                    actionMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : actionMessage.type === 'info' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
+                    {actionMessage.type === 'success' ? <CheckCircle className="w-4 h-4 mr-2" />
+                    : actionMessage.type === 'info' ? <AlertTriangle className="w-4 h-4 mr-2" />
+                    : <XCircle className="w-4 h-4 mr-2" />}
+                    {actionMessage.text}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Database Integrity Audit */}
