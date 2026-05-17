@@ -6,12 +6,12 @@
 #include "mbedtls/pk.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
+#include "time.h"
 
-// Network Config
-// const char* ssid = "YOUR_WIFI";
-// const char* password = "YOUR_PASSWORD";
-// const char* mqtt_server = ""; // Pi Gateway IP e.g. 192.168.1.XX
+// Onboard LED (ESP32-S GPIO 2)
+#define STATUS_LED 2
 
+// Globals
 WiFiClient espClient;
 PubSubClient client(espClient);
 Preferences prefs;
@@ -40,10 +40,11 @@ size_t signData(unsigned char* hash, unsigned char* signature) {
     mbedtls_ctr_drbg_init(&ctr_drbg);
     mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
 
-    // Load key from NVS string
-    mbedtls_pk_parse_key(&pk, (const unsigned char*)privateKey.c_str(), privateKey.length() + 1, NULL, 0);
+    // Load key from NVS string with required RNG arguments for newer ESP32 cores
+    mbedtls_pk_parse_key(&pk, (const unsigned char*)privateKey.c_str(), privateKey.length() + 1, NULL, 0, mbedtls_ctr_drbg_random, &ctr_drbg);
     
-    mbedtls_pk_sign(&pk, MBEDTLS_MD_SHA256, hash, 0, signature, &sig_len, mbedtls_ctr_drbg_random, &ctr_drbg);
+    // Sign hash (hash length is 32 bytes for SHA256)
+    mbedtls_pk_sign(&pk, MBEDTLS_MD_SHA256, hash, 32, signature, 128, &sig_len, mbedtls_ctr_drbg_random, &ctr_drbg);
 
     mbedtls_pk_free(&pk);
     mbedtls_entropy_free(&entropy);
@@ -53,6 +54,10 @@ size_t signData(unsigned char* hash, unsigned char* signature) {
 
 void setup() {
     Serial.begin(115200);
+
+    // Initialize onboard LED
+    pinMode(STATUS_LED, OUTPUT);
+    digitalWrite(STATUS_LED, LOW);  // LED off during setup
     
     // Fetch Key from NVS
     prefs.begin("security", true);
@@ -68,15 +73,40 @@ void setup() {
     }
 
     // WiFi & MQTT Setup
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) delay(500);
-    client.setServer(mqtt_server, 1883);
+    WiFi.begin(ssid.c_str(), password.c_str());
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nWiFi Connected!");
+    
+    // Sync Time via NTP
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.print("Syncing time");
+    while (time(nullptr) < 1000000000) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nTime synchronized!");
+    
+    // Convert MQTT server string to C-string for the library
+    client.setServer(mqtt_server.c_str(), 1883);
+    client.setBufferSize(512);
+
+    // All ready — LED solid on
+    digitalWrite(STATUS_LED, HIGH);
+    Serial.println("Status: LED ON — ready.");
 }
 
 void loop() {
     if (!client.connected()) {
+        // Lost connection — LED off
+        digitalWrite(STATUS_LED, LOW);
+
         if (client.connect("ESP32_Secure_Node")) {
             Serial.println("Connected to Gateway");
+            // Reconnected — LED on
+            digitalWrite(STATUS_LED, HIGH);
         }
     }
     client.loop();
@@ -87,7 +117,10 @@ void loop() {
 
         // Capture Data
         float temp = random(220, 280) / 10.0;
-        String rawData = String(temp);
+        unsigned long currentTimestamp = time(nullptr);
+        
+        // Use device timestamp to make hash unique
+        String rawData = String("ESP32_01") + String(temp) + String(currentTimestamp);
 
         // Hash Data
         unsigned char hash[32];
@@ -99,10 +132,11 @@ void loop() {
 
         // Construct JSON Payload
         StaticJsonDocument<512> doc;
-        doc["device_id"] = "ESP32_01";
-        doc["data"] = temp;
+        doc["deviceId"] = "ESP32_01";
+        doc["temperature"] = temp;
+        doc["deviceTimestamp"] = currentTimestamp;
         
-        // Convert binary hash/sig to hex strings for JSON
+        // Convert binary hash/sig to hex strings
         char hashHex[65];
         for(int i=0; i<32; i++) sprintf(&hashHex[i*2], "%02x", hash[i]);
         doc["hash"] = hashHex;
@@ -114,8 +148,18 @@ void loop() {
         char buffer[512];
         serializeJson(doc, buffer);
         
-        // Publish
-        client.publish("sensors/temperature", buffer);
-        Serial.println("Signed packet sent to Gateway.");
+        // Only publish and blink if still connected
+        if (client.connected()) {
+            client.publish("sensor/data", buffer);
+            Serial.println("Signed packet sent to Gateway.");
+
+            // Blink LED to indicate data transmission (3 visible blinks)
+            for (int i = 0; i < 3; i++) {
+                digitalWrite(STATUS_LED, LOW);
+                delay(200);
+                digitalWrite(STATUS_LED, HIGH);
+                delay(200);
+            }
+        }
     }
 }
