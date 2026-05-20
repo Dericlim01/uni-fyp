@@ -191,7 +191,7 @@ function App() {
           </div>
           <div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-500 bg-clip-text text-transparent">
-              IoT Hybrid Security
+              IoT Security Monitoring
             </h1>
             <p className="text-gray-400 text-sm">Decentralized Access Control & Integrity</p>
           </div>
@@ -271,11 +271,10 @@ function App() {
             {(whitelistResult !== null || actionMessage) && (
               <div className="space-y-2">
                 {whitelistResult !== null && (
-                  <div className={`p-3 rounded-lg border text-xs font-medium ${
-                    whitelistResult
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                  }`}>
+                  <div className={`p-3 rounded-lg border text-xs font-medium ${whitelistResult
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    }`}>
                     <div className="flex items-center">
                       {whitelistResult
                         ? <><CheckCircle className="w-4 h-4 mr-2" /> {adminDeviceId} is whitelisted</>
@@ -293,14 +292,13 @@ function App() {
                   </div>
                 )}
                 {actionMessage && (
-                  <div className={`p-3 rounded-lg border text-xs font-medium flex items-center ${
-                    actionMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  <div className={`p-3 rounded-lg border text-xs font-medium flex items-center ${actionMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                     : actionMessage.type === 'info' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                  }`}>
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    }`}>
                     {actionMessage.type === 'success' ? <CheckCircle className="w-4 h-4 mr-2" />
-                    : actionMessage.type === 'info' ? <AlertTriangle className="w-4 h-4 mr-2" />
-                    : <XCircle className="w-4 h-4 mr-2" />}
+                      : actionMessage.type === 'info' ? <AlertTriangle className="w-4 h-4 mr-2" />
+                        : <XCircle className="w-4 h-4 mr-2" />}
                     {actionMessage.text}
                   </div>
                 )}

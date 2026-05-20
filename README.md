@@ -1,4 +1,4 @@
-# 🛡️ Hybrid IoT Security with Blockchain & Root of Trust (RoT)
+# 🛡️ Securing IoT Device using Blockchain Technology
 
 This repository contains the complete implementation of a multi-layered security framework for IoT systems. The project integrates hardware-level security (ESP32), a local intelligent gateway (Raspberry Pi), and a decentralized verification ledger (Ethereum/Hardhat) to ensure data integrity and device authenticity.
 

@@ -103,7 +103,7 @@ iot-security-dashboard/
 ---
 
 ## 🤝 Support
-Part of the Final Year Project on Hybrid IoT Security. 
+Part of the Final Year Project on Securing IoT Device using Blockchain Technology. 
 
 ---
 
